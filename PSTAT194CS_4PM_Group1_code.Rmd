@@ -1,0 +1,364 @@
+---
+title: "PSTAT194CS_4PM_Group1_Code"
+author: "HaozeZhu"
+date: "6/6/2022"
+output: pdf_document
+---
+
+This part is the  7-day average comfirm cases in California
+```{r}
+library(dplyr) ##please update it to the latest version 
+library(stringr)
+library(zoo)
+library(ggplot2)
+
+
+##some functions Hanmo Li wrote for cleanning covid data
+source(file = "/Users/walterzhu/Rstudio/PSTAT194CS/Final_Project/functions_covid19.R")
+
+
+##get the data from JHU CSSE, which contain the death and confirmed cases at county-level
+base = 'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/'
+death = 'time_series_covid19_deaths_'
+confirm = 'time_series_covid19_confirmed_'
+wkd = '/Users/walterzhu/Rstudio/PSTAT194CS/Final_Project/'
+
+###up-to-date US death and confirmed cases
+us_death = read.csv(paste0(wkd,death,"US.csv"))
+us_confirm = read.csv(paste0(wkd,confirm,"US.csv"))
+
+##dimension
+dim(us_death)
+dim(us_confirm)
+##get the column names of the data 
+col_names = colnames(us_death)
+all_dates = as.Date(paste0(str_sub(col_names[13:dim(us_death)[2]], 2, -1)),tryFormats = c("%m.%d.%y"))
+##these are the dates from the data set 
+#all_dates
+
+##this site provide the confirmed state-level total test from which you can get the positive rate  
+covid19_project_url = "https://api.covidtracking.com/v1/states/daily.csv"
+
+covid_19_project = read.csv(covid19_project_url)
+
+covid_19_project$date = as.Date(as.character(covid_19_project$date), "%Y %m %d")
+
+
+##nation level analysis
+##nation level daily confirmed cases, plot and 
+nation_death = us_death %>%
+  dplyr::filter(Province_State == "California")
+
+###observed confirmed cases
+nation_confirmed = us_confirm %>%
+  dplyr::filter(Province_State == "California")
+
+###get the cumulative death toll and confirmed cases
+nation_death_sum = apply(nation_death[,12:dim(nation_death)[2]], 2, sum)
+
+nation_confirmed_sum = apply(nation_confirmed[,12:dim(nation_confirmed)[2]], 2, sum)
+
+##get  dates you want to analyze  
+start_date = as.Date("2021-11-30")
+
+end_date = as.Date("2022-2-28")
+
+
+
+
+##the deaths and confirmed cases for the state on the selected dates
+nation_death_selected = nation_death_sum[1 + which(all_dates %in% seq.Date(start_date, end_date, by=1))]
+nation_confirmed_selected = nation_confirmed_sum[which(all_dates %in% seq.Date(start_date, end_date, by=1))]
+
+nation_death_selected=as.numeric(nation_death_selected)
+nation_confirmed_selected=as.numeric(nation_confirmed_selected)
+
+##plot cumulative confirmed cases and death
+date_selected=seq.Date(start_date, end_date, by=1)
+par(mfrow=c(1,2))
+plot(date_selected,nation_confirmed_selected,xlab='date',ylab='cumulative observed confirmed cases',type='l')
+plot(date_selected,nation_death_selected,xlab='date',ylab='cumulative death toll',type='l')
+dev.off() ##close it
+
+##daily increase between each date
+daily_date_selected=date_selected[2:length(date_selected)]
+
+##let's get the daily confirmed cases 
+nation_confirmed_selected_daily=nation_confirmed_selected[2:length(nation_confirmed_selected)]-nation_confirmed_selected[1:(length(nation_confirmed_selected)-1)]
+##create a data frame
+daily_confirmed_nation_df = data.frame(date = daily_date_selected, value = nation_confirmed_selected_daily)
+
+##let's get the daily death cases 
+nation_death_selected_daily=nation_death_selected[2:length(nation_death_selected)]-nation_death_selected[1:(length(nation_death_selected)-1)]
+##create a data frame
+daily_death_nation_df = data.frame(date = daily_date_selected, value = nation_death_selected_daily)
+
+###daily confirmed cases in US
+daily_confirmed_nation_df %>%
+  ggplot(aes(x=date, y=value)) +
+  geom_bar(stat = 'identity', color="white",  fill="#ff8540", width = 1) +
+  ggtitle("Daily Confirmed Cases CA",subtitle ="Figure 2") +
+  ylab("Daily confirmed Cases in CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        plot.title = element_text(size=20,hjust = 0.5),
+        plot.subtitle=element_text(size=15,hjust = 0.5),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1,size = 8))
+
+
+##let's obtain a seven-day average of the smoothed version of the confirmed cases and deaths
+
+nation_confirmed_selected_daily_avg = data_seven_day_smoothing(nation_confirmed_selected_daily)
+
+daily_confirmed_nation_smoothed_df = data.frame(date = daily_date_selected, value = nation_confirmed_selected_daily_avg)
+
+nation_death_selected_daily_avg = data_seven_day_smoothing(nation_death_selected_daily)
+
+daily_death_nation_smoothed_df = data.frame(date = daily_date_selected, value = nation_death_selected_daily_avg)
+
+##plot the smoothed version 
+
+###daily confirmed cases in US
+# graph for actual covid data
+daily_confirmed_nation_smoothed_df %>%
+  ggplot(aes(x=date, y=value)) +
+  geom_bar(stat = 'identity', color="white",  fill="#ff8540", width = 1) +
+  ggtitle("7-day Averaged Daily Confirmed Cases CA",subtitle ="Figure 3") +
+  ylab("7-day Averaged Daily Confirmed Cases CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        plot.title = element_text(size=20,hjust = 0.5),
+        plot.subtitle=element_text(size=15,hjust = 0.5),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1,size = 8),
+        axis.title.y = element_text(size=14))
+```
+
+```{r}
+# inverse transform method for generating random number from Poisson distribution
+poisson_func <- function(lambda){
+  x = 0
+  p = exp(-lambda)
+  s = p
+  u = runif(1)
+  while(u > s){
+    x = x+1
+    p = p*lambda/x
+    s = s+p
+  }
+  return(x)
+}
+# do a Monte Carlo Simulation of the inverse transform method
+poisson_trial = NULL
+for(i in 1:10000){
+  poisson_trial[i]=poisson_func(3)
+}
+# plot the Monte Carlo result
+hist(poisson_trial,freq=FALSE)
+lines(1:12,dpois(1:12,lambda = 3),col = 'red')
+```
+
+```{r}
+#---------------------------------------------------------------------------------------------------------------------
+# model referenced [Article on COVID-19 Monte Carlo Simulation Modeling](https://www.nature.com/articles/s41598-020-70091-1#Sec7)
+
+TransSimu = function(days = 300, nd = 30, Rt = rr, muT = 4, sizeV = 1,limit=1000000, pp=0.001,n0=1) 
+              {                    # beginning of the function
+# days: observation period
+# nd: simulation period
+# Rt = rr  # infection rate pattern
+#  muT  is the mean time an infected person will transmit the virus to (i.e., infect) another person.
+# We assume that the independence among those ones being infected.  The default value is set as muT = 4 (days).
+# sizeV: the dispersion parameter so that variance = mu + mu^2/size. The default value is set as sizeV =1.
+# limit: the target/study population size
+# pp: the proportion of people with immunity in the population
+# n0: the initial number of infectious persons.  
+# The default setting assumes one virus carrier/infectious person in the beginning, i.e., n0=1.
+# 
+kk = atrisk = rep(0,days); nn = length(kk)   
+# kk: daily new cases; atrisk: number of active cases each day; simulation period of nn days
+ tt = 0   # the cumulative total number of confirmed cases. 
+
+  if(nd > length(Rt)) stop("The length of Rt should not be smaller than nd.")
+   stoplimit = limit*(1-pp)
+
+  nk = n0   # The initial number of existing infectious persons.  
+            # there must be a first patient to kick off the transmission process! 
+ for(k in 1:nk) {
+ #   
+  if(tt>stoplimit)  Rt[1]=0.001
+  ni = poisson_func(Rt[1])    # how many people will be infected by this existing virus carrier person.
+    imuind = sample(c(0,1), 1, prob=c((1-pp),pp))
+    if(imuind==1) ni=0
+  tt=tt+ni
+    if(ni > 0) {
+  tk = rep(0,ni)
+  for (i in 1:ni) {
+   tk[i] = rnbinom(1,size=sizeV,mu=muT)+1  # this is the nth day on which a new case occurs
+       kk[tk[i]] = kk[tk[i]] + 1
+                      }
+  #       
+         pastevent = c(rep(1,(max(tk)-1)),rep(0, (days-max(tk)+1)))
+            atrisk = atrisk + pastevent   
+                      } # end of  if(ni > 0)
+                         }  # end of k loop
+#   
+ 
+ for(j in 2:nd) {
+     nk = kk[j-1]    # this is the number of people newly infected (i.e., new cases) on (j-1)th day
+   if(nk > 0) {      
+         for(k in 1:nk) {
+ #   
+  if(tt>stoplimit)  Rt[j]=0.001
+  ni = poisson_func(Rt[j])    # how many people will be infected by this existing virus carrier person.
+    imuind = sample(c(0,1), 1, prob=c((1-pp),pp))
+    if(imuind==1) ni=0
+  tt=tt+ni
+    if(ni > 0) {
+  tk = rep(0,ni)
+  for (i in 1:ni) {
+     tk[i] = rnbinom(1,size=sizeV,mu=muT)+1+j  # this is the nth day on which a new case occurs
+       kk[tk[i]] = kk[tk[i]] + 1
+                      }
+  #       
+         pastevent = c(rep(0, (j-1) ), rep(1,(max(tk)+1-j)),rep(0, (days-max(tk))))
+            atrisk = atrisk + pastevent   
+                      } # end of  if(ni > 0)
+                         }  # end of k loop
+                      }  #  end of  if(nk > 0)
+ #        
+                      }     # end of j loop
+                         
+     list(riskpopu = atrisk, dailynew = kk, total=tt)     # output information
+
+                 }  # end of the function
+#------------------------------------------------------------------------
+
+#---------------------------------------------------------------------------
+
+# estimated infection rate in California
+rr =c( rep(1.2,10), rep(1.6,5), rep(2.7,5),rep(3.7, 10), # the infection rate in Dec
+       rep(1.3, 5),rep(1.6, 5),rep(0.7, 5),rep(0.9, 5), rep(0.5, 5), rep(0.3, 5), # the infection rate in Jan
+       rep(0.4, 10), rep(0.5, 10), rep(0.5, 10) # the infectuon rate in Feb
+       )
+
+# test run for the model
+# covid_ca_simulation = TransSimu(nd=90, muT=3.8,sizeV=1.1,n0=7339,pp=0.10)
+covid_ca_simulation = TransSimu(nd=90, muT=7,sizeV=1.1,n0=7339,pp=0.10)
+covid_ca_simulation$riskpopu[1:90]
+
+# Monte Carlo simulation of the model
+num_trials = 100
+# create a dataframe to hold the trial result
+MC_simulation <- data.frame(date= daily_confirmed_nation_smoothed_df["date"][[1]] )
+# run Monte Carlo simulation
+for(i in 1:num_trials){
+  covid_simu = TransSimu(nd=90, muT=7,sizeV=1.1,n0=7339,pp=0.10)
+  new <- covid_simu$riskpopu[1:90]  # Create new column
+  MC_simulation[ , ncol(MC_simulation) + 1] <- new                  # Append new column
+  colnames(MC_simulation)[ncol(MC_simulation)] <- paste0("new", i) # Rename column name
+}
+
+library(tidyverse)
+# change data column to row names
+MC_simulation = MC_simulation %>% remove_rownames %>% column_to_rownames(var="date")
+# the Monte Carlo simulation result
+rowMeans(MC_simulation)
+# the sd of Monte Carlo simulation
+# apply(MC_simulation[,-1], 1, sd)
+
+# since the model takes a considerable time to run, we use bootstrap to resample and gain a large sample
+# bootstrap size
+bootstrap_size = 2000
+set.seed(10)
+# resample from Monte Carlo simulation results
+resamlpe_seq <- sample(c(1:num_trials),size=bootstrap_size,replace=TRUE)
+# get the bootsrap sample into a new dataframe
+boot_df <- data.frame(date= daily_confirmed_nation_smoothed_df["date"][[1]] )
+for(i in 1:bootstrap_size){
+  new_sample <- MC_simulation[,resamlpe_seq[i]]  # Create new column
+  boot_df[ , ncol(boot_df) + 1] <- new_sample                  # Append new column
+  colnames(boot_df)[ncol(boot_df)] <- paste0("bootstrap", i) # Rename column name
+}
+# change data column to row names
+boot_df = boot_df %>% remove_rownames %>% column_to_rownames(var="date")
+# bootstrap result
+# rowMeans(boot_df)
+# bootstrap sd
+# apply(boot_df[,-1], 1, sd)
+
+# dataframe for var.mc v.s. var,bootstrap
+compare_var <- data.frame(date= daily_confirmed_nation_smoothed_df["date"][[1]])
+compare_var["original"] <- apply(MC_simulation[,-1], 1, sd)
+compare_var["bootstrap"] <- apply(boot_df[,-1], 1, sd)
+compare_var = compare_var %>% remove_rownames %>% column_to_rownames(var="date")
+compare_var = as.data.frame(t(compare_var))
+```
+
+Plot the result
+
+```{r}
+# add simulation into the covid data dataframe
+# daily_confirmed_nation_smoothed_df["simulation"] <- covid_ca_simulation$riskpopu[1:90]
+daily_confirmed_nation_smoothed_df["simulation"] <- c(rowMeans(boot_df))
+# plot the bootstrap data
+daily_confirmed_nation_smoothed_df %>%
+  ggplot(aes(x=date, y=simulation)) +
+  ggtitle("MC Simulated Covid-19 Cases for California",subtitle ="Figure 3") +
+  geom_bar(stat = 'identity', color="white",  fill="skyblue2", width = 1) +
+  ylab("MC Simulated Case Numbers in CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        plot.title = element_text(size=20,hjust = 0.5),
+        plot.subtitle=element_text(size=15,hjust = 0.5),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1,size = 8),
+        axis.title.y = element_text(size=14))
+dev.off()
+```
+
+```{r}
+# repeat date for the plot
+date = NULL
+for(i in 1:length(daily_confirmed_nation_smoothed_df["date"][[1]])){
+  date = append(date, rep(daily_confirmed_nation_smoothed_df["date"][[1]][i],2))
+}
+
+# add covid comfirm cases and simulation to the same column
+value = NULL
+for(i in 1:length(daily_confirmed_nation_smoothed_df["date"][[1]])){
+  real_value = daily_confirmed_nation_smoothed_df["value"][[1]][i]
+  simulation_value = daily_confirmed_nation_smoothed_df["simulation"][[1]][i]
+  value = append(value, c(real_value,simulation_value))
+}
+
+# create label for the values
+label = rep(c("Covid","Simulation"),90)
+# dataframe for Grouped barchart
+plot_df <- data.frame(date,value,label)
+
+# plot the covid data v.s. simulation 
+# combined graph
+plot_df %>%
+  ggplot(aes(x=date, y=value, fill = label)) +
+  geom_bar(stat = 'identity', color="white", width = 1,position="dodge") +
+  ggtitle("Averaged Daily Confirmed Cases v.s. Simulation",subtitle ="Figure 4") +
+  ylab("7-day averaged daily confirmed cases in  CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        plot.title = element_text(size=18,hjust = 0.5),
+        plot.subtitle=element_text(size=15,hjust = 0.5),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1,size = 8),
+        axis.title.y = element_text(size=14))
+
+```

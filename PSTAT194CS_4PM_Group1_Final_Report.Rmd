@@ -1,0 +1,539 @@
+---
+title: "Monte Carlo Simulation Procedure for Modelling COVID‑19"
+author:
+  - Group Leader:HaozeZhu (haozezhu)
+  - Group member:DanielBadilla (danielbadilla), RuhikaNandy (ruhika)
+date: "06/06/2022"
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+---
+```{r,include = FALSE}
+library(dplyr) ##please update it to the latest version 
+library(stringr)
+library(zoo)
+library(ggplot2)
+
+
+##some functions Hanmo Li wrote for cleanning covid data
+source(file = "/Users/walterzhu/Rstudio/PSTAT194CS/Final_Project/functions_covid19.R")
+
+
+##get the data from JHU CSSE, which contain the death and confirmed cases at county-level
+base = 'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/'
+death = 'time_series_covid19_deaths_'
+confirm = 'time_series_covid19_confirmed_'
+wkd = '/Users/walterzhu/Rstudio/PSTAT194CS/Final_Project/'
+
+###up-to-date US death and confirmed cases
+us_death = read.csv(paste0(wkd,death,"US.csv"))
+us_confirm = read.csv(paste0(wkd,confirm,"US.csv"))
+
+##dimension
+dim(us_death)
+dim(us_confirm)
+##get the column names of the data 
+col_names = colnames(us_death)
+all_dates = as.Date(paste0(str_sub(col_names[13:dim(us_death)[2]], 2, -1)),tryFormats = c("%m.%d.%y"))
+
+##nation level daily confirmed cases, plot and 
+nation_death = us_death %>%
+  dplyr::filter(Province_State == "California")
+
+###observed confirmed cases
+nation_confirmed = us_confirm %>%
+  dplyr::filter(Province_State == "California")
+
+
+###get the cumulative death toll and confirmed cases
+nation_death_sum = apply(nation_death[,12:dim(nation_death)[2]], 2, sum)
+
+nation_confirmed_sum = apply(nation_confirmed[,12:dim(nation_confirmed)[2]], 2, sum)
+
+##get  dates you want to analyze  
+start_date = as.Date("2021-11-30")
+
+end_date = as.Date("2022-2-28")
+
+
+
+
+##the deaths and confirmed cases for the state on the selected dates
+nation_death_selected = nation_death_sum[1 + which(all_dates %in% seq.Date(start_date, end_date, by=1))]
+nation_confirmed_selected = nation_confirmed_sum[which(all_dates %in% seq.Date(start_date, end_date, by=1))]
+
+nation_death_selected=as.numeric(nation_death_selected)
+nation_confirmed_selected=as.numeric(nation_confirmed_selected)
+
+##plot cumulative confirmed cases and death
+date_selected=seq.Date(start_date, end_date, by=1)
+par(mfrow=c(1,2))
+plot(date_selected,nation_confirmed_selected,xlab='date',ylab='cumulative observed confirmed cases',type='l')
+plot(date_selected,nation_death_selected,xlab='date',ylab='cumulative death toll',type='l')
+dev.off() ##close it
+
+##daily increase between each date
+daily_date_selected=date_selected[2:length(date_selected)]
+
+##let's get the daily confirmed cases 
+nation_confirmed_selected_daily=nation_confirmed_selected[2:length(nation_confirmed_selected)]-nation_confirmed_selected[1:(length(nation_confirmed_selected)-1)]
+##create a data frame
+daily_confirmed_nation_df = data.frame(date = daily_date_selected, value = nation_confirmed_selected_daily)
+
+##let's get the daily death cases 
+nation_death_selected_daily=nation_death_selected[2:length(nation_death_selected)]-nation_death_selected[1:(length(nation_death_selected)-1)]
+##create a data frame
+daily_death_nation_df = data.frame(date = daily_date_selected, value = nation_death_selected_daily)
+
+###daily confirmed cases in US
+daily_confirmed_nation_df %>%
+  ggplot(aes(x=date, y=value)) +
+  geom_bar(stat = 'identity', color="white",  fill="#ff8540", width = 1) +
+  ggtitle("Daily Confirmed Cases CA",subtitle ="Figure 2") +
+  ylab("Daily confirmed Cases in CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        plot.title = element_text(size=20,hjust = 0.5),
+        plot.subtitle=element_text(size=15,hjust = 0.5),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1,size = 8))
+dev.off()
+
+
+##let's obtain a seven-day average of the smoothed version of the confirmed cases and deaths
+
+nation_confirmed_selected_daily_avg = data_seven_day_smoothing(nation_confirmed_selected_daily)
+
+daily_confirmed_nation_smoothed_df = data.frame(date = daily_date_selected, value = nation_confirmed_selected_daily_avg)
+
+nation_death_selected_daily_avg = data_seven_day_smoothing(nation_death_selected_daily)
+
+daily_death_nation_smoothed_df = data.frame(date = daily_date_selected, value = nation_death_selected_daily_avg)
+
+##plot the smoothed version 
+
+###daily confirmed cases in US
+daily_confirmed_nation_smoothed_df %>%
+  ggplot(aes(x=date, y=value)) +
+  geom_bar(stat = 'identity', color="white",  fill="#ff8540", width = 1) +
+  ylab("7-day averaged daily confirmed cases CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1))
+dev.off()
+```
+
+```{r,include = FALSE}
+# inverse transform method for generating random number from Poisson distribution
+poisson_func <- function(lambda){
+  x = 0
+  p = exp(-lambda)
+  s = p
+  u = runif(1)
+  while(u > s){
+    x = x+1
+    p = p*lambda/x
+    s = s+p
+  }
+  return(x)
+}
+# do a Monte Carlo Simulation of the inverse transform method
+poisson_trial = NULL
+for(i in 1:10000){
+  poisson_trial[i]=poisson_func(3)
+}
+# plot the Monte Carlo result
+hist(poisson_trial,freq=FALSE)
+lines(1:12,dpois(1:12,lambda = 3),col = 'red')
+```
+
+```{r,include = FALSE}
+#---------------------------------------------------------------------------------------------------------------------
+# model 
+
+TransSimu = function(days = 300, nd = 30, Rt = rr, muT = 4, sizeV = 1,limit=1000000, pp=0.001,n0=1) 
+              {                    # beginning of the function
+# days: observation period
+# nd: simulation period
+# Rt = rr  # infection rate pattern
+#  muT  is the mean time an infected person will transmit the virus to (i.e., infect) another person.
+# We assume that the independence among those ones being infected.  The default value is set as muT = 4 (days).
+# sizeV: the dispersion parameter so that variance = mu + mu^2/size. The default value is set as sizeV =1.
+# limit: the target/study population size
+# pp: the proportion of people with immunity in the population
+# n0: the initial number of infectious persons.  
+# The default setting assumes one virus carrier/infectious person in the beginning, i.e., n0=1.
+# 
+kk = atrisk = rep(0,days); nn = length(kk)   
+# kk: daily new cases; atrisk: number of active cases each day; simulation period of nn days
+ tt = 0   # the cumulative total number of confirmed cases. 
+
+  if(nd > length(Rt)) stop("The length of Rt should not be smaller than nd.")
+   stoplimit = limit*(1-pp)
+
+  nk = n0   # The initial number of existing infectious persons.  
+            # there must be a first patient to kick off the transmission process! 
+ for(k in 1:nk) {
+ #   
+  if(tt>stoplimit)  Rt[1]=0.001
+  ni = poisson_func(Rt[1])    # how many people will be infected by this existing virus carrier person.
+    imuind = sample(c(0,1), 1, prob=c((1-pp),pp))
+    if(imuind==1) ni=0
+  tt=tt+ni
+    if(ni > 0) {
+  tk = rep(0,ni)
+  for (i in 1:ni) {
+   tk[i] = rnbinom(1,size=sizeV,mu=muT)+1  # this is the nth day on which a new case occurs
+       kk[tk[i]] = kk[tk[i]] + 1
+                      }
+  #       
+         pastevent = c(rep(1,(max(tk)-1)),rep(0, (days-max(tk)+1)))
+            atrisk = atrisk + pastevent   
+                      } # end of  if(ni > 0)
+                         }  # end of k loop
+#   
+ 
+ for(j in 2:nd) {
+     nk = kk[j-1]    # this is the number of people newly infected (i.e., new cases) on (j-1)th day
+   if(nk > 0) {      
+         for(k in 1:nk) {
+ #   
+  if(tt>stoplimit)  Rt[j]=0.001
+  ni = poisson_func(Rt[j])    # how many people will be infected by this existing virus carrier person.
+    imuind = sample(c(0,1), 1, prob=c((1-pp),pp))
+    if(imuind==1) ni=0
+  tt=tt+ni
+    if(ni > 0) {
+  tk = rep(0,ni)
+  for (i in 1:ni) {
+     tk[i] = rnbinom(1,size=sizeV,mu=muT)+1+j  # this is the nth day on which a new case occurs
+       kk[tk[i]] = kk[tk[i]] + 1
+                      }
+  #       
+         pastevent = c(rep(0, (j-1) ), rep(1,(max(tk)+1-j)),rep(0, (days-max(tk))))
+            atrisk = atrisk + pastevent   
+                      } # end of  if(ni > 0)
+                         }  # end of k loop
+                      }  #  end of  if(nk > 0)
+ #        
+                      }     # end of j loop
+                         
+     list(riskpopu = atrisk, dailynew = kk, total=tt)     # output information
+
+                 }  # end of the function
+#------------------------------------------------------------------------
+
+#---------------------------------------------------------------------------
+
+# estimated infection rate in California
+rr =c( rep(1.2,10), rep(1.6,5), rep(2.7,5),rep(3.7, 10), # the infection rate in Dec
+       rep(1.3, 5),rep(1.6, 5),rep(0.7, 5),rep(0.9, 5), rep(0.5, 5), rep(0.3, 5), # the infection rate in Jan
+       rep(0.4, 10), rep(0.5, 10), rep(0.5, 10) # the infectuon rate in Feb
+       )
+
+# test run for the model
+# covid_ca_simulation = TransSimu(nd=90, muT=3.8,sizeV=1.1,n0=7339,pp=0.10)
+covid_ca_simulation = TransSimu(nd=90, muT=7,sizeV=1.1,n0=7339,pp=0.10)
+covid_ca_simulation$riskpopu[1:90]
+
+# Monte Carlo simulation of the model
+num_trials = 5
+# create a dataframe to hold the trial result
+MC_simulation <- data.frame(date= daily_confirmed_nation_smoothed_df["date"][[1]] )
+# run Monte Carlo simulation
+for(i in 1:num_trials){
+  covid_simu = TransSimu(nd=90, muT=7,sizeV=1.1,n0=7339,pp=0.10)
+  new <- covid_simu$riskpopu[1:90]  # Create new column
+  MC_simulation[ , ncol(MC_simulation) + 1] <- new                  # Append new column
+  colnames(MC_simulation)[ncol(MC_simulation)] <- paste0("new", i) # Rename column name
+}
+
+library(tidyverse)
+# change data column to row names
+MC_simulation = MC_simulation %>% remove_rownames %>% column_to_rownames(var="date")
+# the Monte Carlo simulation result
+rowMeans(MC_simulation)
+# the sd of Monte Carlo simulation
+apply(MC_simulation[,-1], 1, sd)
+# since the model takes a considerable time to run, we use bootstrap to resample and gain a large sample
+# bootstrap size
+bootstrap_size = 2000
+# resample from Monte Carlo simulation results
+resamlpe_seq <- sample(c(1:num_trials),size=bootstrap_size,replace=TRUE)
+
+# get the bootsrap sample into a new dataframe
+boot_df <- data.frame(date= daily_confirmed_nation_smoothed_df["date"][[1]] )
+for(i in 1:bootstrap_size){
+  new_sample <- MC_simulation[,resamlpe_seq[i]]  # Create new column
+  boot_df[ , ncol(boot_df) + 1] <- new_sample                  # Append new column
+  colnames(boot_df)[ncol(boot_df)] <- paste0("bootstrap", i) # Rename column name
+}
+# change data column to row names
+boot_df = boot_df %>% remove_rownames %>% column_to_rownames(var="date")
+# bootstrap result
+rowMeans(boot_df)
+# bootstrap sd
+apply(boot_df[,-1], 1, sd)
+
+# dataframe for var.mc v.s. var,bootstrap
+compare_var <- data.frame(date= daily_confirmed_nation_smoothed_df["date"][[1]])
+compare_var["original"] <- apply(MC_simulation[,-1], 1, sd)
+compare_var["bootstrap"] <- apply(boot_df[,-1], 1, sd)
+compare_var = compare_var %>% remove_rownames %>% column_to_rownames(var="date")
+compare_var = as.data.frame(t(compare_var))
+compare_var
+```
+
+```{r,include = FALSE}
+# add simulation into the covid data dataframe
+# daily_confirmed_nation_smoothed_df["simulation"] <- covid_ca_simulation$riskpopu[1:90]
+daily_confirmed_nation_smoothed_df["simulation"] <- c(rowMeans(boot_df))
+# repeat date for the plot
+date = NULL
+for(i in 1:length(daily_confirmed_nation_smoothed_df["date"][[1]])){
+  date = append(date, rep(daily_confirmed_nation_smoothed_df["date"][[1]][i],2))
+}
+
+# add covid comfirm cases and simulation to the same column
+value = NULL
+for(i in 1:length(daily_confirmed_nation_smoothed_df["date"][[1]])){
+  real_value = daily_confirmed_nation_smoothed_df["value"][[1]][i]
+  simulation_value = daily_confirmed_nation_smoothed_df["simulation"][[1]][i]
+  value = append(value, c(real_value,simulation_value))
+}
+
+# create label for the values
+label = rep(c("Covid","Simulation"),90)
+# dataframe for Grouped barchart
+plot_df <- data.frame(date,value,label)
+
+# plot the covid data v.s. simulation 
+plot_df %>%
+  ggplot(aes(x=date, y=value, fill = label)) +
+  geom_bar(stat = 'identity', color="white", width = 1,position="dodge") +
+  ylab("7-day averaged daily confirmed cases in  CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1))
+```
+
+
+#1.Abstract 
+
+We decided on doing this analysis so we could get a better grasp of the coronavirus disease and how it has spread throughout our nation, and specifically our state of California. A Monte Carlo simulation model was developed to simulate the COVID-19 spread and was examined against existing COVID-19 confirmed cases. An infection rate parameter and the muT parameter, or time (in days) taken for one to be infected, were important in this modeling process. From our code, we were able to determine that the model created, with an infection rate that varied on a daily basis, was fairly accurate with the confirmed cases, however there were some inconsistencies. Our results consisted of a model which uses a Monte Carlo method, more specifically the inverse transform method for a poisson random variable, to generate our results of the model, which greatly resemble the data of the actual covid cases. Moreover, this model has been improved by the bootstrap method, which takes a Monte Carlo approach for reducing the variation in the model. In terms of application for this model, it can be used as a decision making tool for modeling the infectious virus and battling it in real-time. This is helpful in terms of determining how to allocate resources for different places which might be extremely affected by the pandemic.
+
+
+#2.Introduction 
+
+We currently live in a world that has been turned upside down by the pandemic that began due to the coronavirus disease. The infectious disease has impacted society in many different ways, changing the way we normally carry ourselves, interact with others, handle personal and professional matters, and more on a daily basis. The pandemic has made people come together in being safe and becoming much more germ-conscious but it has also highlighted a divide in perception of science and the huge amount of variance in the way our human population trusts science. As a result, this, along with the fight to find science that adequately fights this persisting virus, has led to the fast and intense spread of the virus. Just as many researchers have told the public, coronavirus is spread via droplets and virus particles that become airborne when an infected person breathes, talks, coughs, sneezes, etc. Large droplets may fall to the ground nearly immediately, but small infectious particles can linger in the air, accumulating in areas where there is a high density of people and inadequate ventilation. This is how people get infected and how it spreads. Based off of what we know, symptoms in an infected patient show within a couple to 14 days of viral exposure, and they become contagious from the first two days after until about 20 days after. This deadly virus has been around for 2.5 years, and has evolved to become a worldwide pandemic affecting populations everywhere. We have been exposed to a variety of safety precautions such as testing guidelines, mask-mandates, washing hands regularly, physical distancing, and vaccines! The existence of the two mRNA vaccines such as Pfizer and Moderna in addition to the Johnson and Johnson vaccine have helped reduce risk of serious adverse events. However, that being said, despite all of these precautions, preventative measures, and post-infection initiatives, COVID-19 still persists and still continues to infect, hospitalize, and kill many of our loved ones. Knowing all of these factors, we as a group wanted to explore simulation of an infection model and specifically SARS-Cov-2, and use Monte Carlo Simulation to theorize and compare it to real data. The main question we want to ask and determine is whether we can use a model based on poisson distribution to accurately make a model that simulates covid infections. We explore the process by which we did these things in the following section. 
+
+
+
+#3. Methods
+
+We will be recreating a model^[Reference#1] in which we use a Monte Carlo simulation with Poisson distribution to simulate COVID-19 infections. As our project revolves around COVID-19 infections in specific locations, we decided to use a model that takes an existing infection rate to attempt to simulate COVID-19 infections. The model itself incorporates 90 different infection rates to account for 90 different days (i.e., 3 months) as the model is set to predict for that time period. We decided to use an inconsistent infection rate rather than a set one for this model because infection rate per location changes on a daily basis in real life. Because we want our model to accurately simulate based on the estimated infection rates, making sure this was not a constant was crucial. The poisson distribution function created implements the inverse transform method that we have utilized in class to generate random numbers that represent new infected cases by taking in infection rate as lambda. 
+	
+##MC Inverse Transform  Method for Poisson Distribution:
+Inverse Transform Method (Discrete Case)^[Reference#2]
+Since poisson distributions are discrete, we will be using the inverse transform method for the discrete case. According to the textbook, "Statistical Computing with R" by Maria L. Rizzo, if X is a discrete and
+
+$$...< x_{i-1} < x_i < x_{i+1} < ...$$
+
+are the points of discontinuity of $F_X(x)$, then the inverse transformation is
+$F_X^{-1}(u) = x_i$, where $F_X(x_{i-1}) < u \le F_X(x_i)$.
+  For each random variate required:
+  
+  1. Generate a random u from Uniform(0,1).
+  2. Deliver $x_i$ where $F(x_{i-1}) < u \le F(x_i)$
+  
+More specifically, for the method of generating a poisson distribution
+using the inverse transform method, we will use the following steps to 
+generate a poisson random variable X with mean $\lambda$:
+  
+  1. Set X=0
+  2. Generate $U \sim Unif(0,1)$
+  3. If $U < e^{-\lambda}$, then stop. Otherwise, if $U \ge e^{-\lambda}$, then set X = X + 1 and go back to step 2.
+  
+In code, for the poisson distribution, this would look like
+
+```{r}
+poisson_func <- function(lambda){
+  x = 0
+  p = exp(-lambda)
+  s = p
+  u = runif(1)
+  while(u > s){
+    x = x+1
+    p = p*lambda/x
+    s = s+p
+  }
+  return(x)
+}
+```
+
+##Covid Data Used for Comparison
+
+For comparison we decided to use California's Covid-19 confirmed cases^[Reference#3] from Dec 01, 2021 to Feb 28, 2022 since around Christmas there is a large spike of Covid cases due to the Omicron variant. A more volatile infection rate caused by the Omicron variant can be further used to test our model's validity. The dataset we have has a steep drop in cases during the weekends because most of the testing facilities close on weekends. But these gaps are not a real representation of the actual infection rates since the infection rates wouldn't decrease on weekends. Therefore we apply smoothing on our dataset and use 7-day averaged confirmed cases in our comparison, which is a more realistic representation of the infection rates.
+
+##Prediction Model
+The parameters that we observe in our existing model are listed below:
+
+* days - Observation period (in days) of a simulation study
+* nd - Simulation period (in days) of a simulation study
+* Rt - Average reproduction / infection rate (i.e., the expected number of secondary cases that each existing infectious case will generate); Rt is a function of time / day
+* muT - Average / expected number of days for an existing infectious person to infect a susceptible person in the population; mean parameter for the negative binomial distribution
+* sizeV - The dispersion parameter for the negative binomial distribution so that variance = muT + (muT)2 / sizeV
+* limit - The study/target population
+* pp - The proportion of people with immunity in the population
+* n0 - The initial number of infectious persons prior to the simulation period
+
+##Importance of Parameters:
+
+The infection rate parameter Rt played an important role in our model as the actual number of people being infected by each of the active infectious cases followed a poisson distribution with mean Rt.
+The muT parameter is important for determining the exact number of days it takes for someone to get infected, which follows a negative binomial distribution with mean muT.
+
+We will be using the following as our estimated infection rate Rt:
+```{r}
+# estimated infection rate in California
+rr =c( rep(1.2,10), rep(1.6,5), rep(2.7,5),rep(3.7, 10), # the infection rate in Dec
+       rep(1.3, 5),rep(1.6, 5),rep(0.7, 5),rep(0.9, 5), rep(0.5, 5), rep(0.3, 5), # the infection rate in Jan
+       rep(0.4, 10), rep(0.5, 10), rep(0.5, 10) # the infectuon rate in Feb
+       )
+```
+
+We utilize a Monte Carlo approach to generate cases from the model by runnung the model for 1000 times. We also decide to implement bootstrap techniques. As it currently exists, our model took a lot of time to generate simulated output for COVID-19 cases. To both reduce the time taken to generate this model in addition to reduce variance overall, we decided to implement bootstrap techniques. Doing this narrows the existing confidence intervals and allows us to retain more confidence that the distribution of the simulated is close to the true values. 
+
+
+#4.Results
+
+For the inverse transform method we performed a Monte Carlo simulation where we sampled 1000 random numbers. Figure 1 shows the density plot for generated samples and the red line indicates the theoretical density of poisson distribution. The graph demonstrates that our sample density is fairly close to the theoretical density of poisson distribution, i.e. our sample is poisson-distributed. Therefore, the inverse transform method can be used to randomly generate poisson-distributed numbers. We use this method specifically because it generates one sample from the model that can be compared in a simulation versus confirmed study. 
+
+```{r,echo = FALSE}
+# graph for poisson_trial function
+hist(poisson_trial,freq=FALSE,
+     main="Inverse Transform simulated Poisson Distribution",
+     sub = "Figure 1")
+lines(1:12,dpois(1:12,lambda = 3),col = 'red')
+```
+
+We created four graphs representing the 7-day averaged daily cases of the COVID-19 virus in California. Figure 2, the initial orange graph, is the unsmoothed Daily confirmed cases in California over 3 month period from December 2021 to March 2022. Figure 3 is the smoothed 7-day Averaged Daily Confirmed Cases in California. 
+
+```{r,,echo = FALSE}
+###daily confirmed cases in US
+daily_confirmed_nation_df %>%
+  ggplot(aes(x=date, y=value)) +
+  geom_bar(stat = 'identity', color="white",  fill="#ff8540", width = 1) +
+  ggtitle("Daily Confirmed Cases CA",subtitle ="Figure 2") +
+  ylab("Daily confirmed Cases in CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        plot.title = element_text(size=20,hjust = 0.5),
+        plot.subtitle=element_text(size=15,hjust = 0.5),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1,size = 8))
+```
+
+
+```{r,echo = FALSE}
+# graph for actual covid data
+daily_confirmed_nation_smoothed_df %>%
+  ggplot(aes(x=date, y=value)) +
+  geom_bar(stat = 'identity', color="white",  fill="#ff8540", width = 1) +
+  ggtitle("7-day Averaged Daily Confirmed Cases CA",subtitle ="Figure 3") +
+  ylab("7-day Averaged Daily Confirmed Cases CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        plot.title = element_text(size=20,hjust = 0.5),
+        plot.subtitle=element_text(size=15,hjust = 0.5),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1,size = 8),
+        axis.title.y = element_text(size=14))
+```
+
+
+Figure 3, the second blue graph, is based on our simulation model and is the simulated number of cases in California over time.  Finally, Figure 4, the last combined color graph, is a graphical representation of a comparison between the simulated and confirmed COVID-19 case results in California over time. 
+
+```{r,echo = FALSE}
+# graph for simulated covid data
+daily_confirmed_nation_smoothed_df %>%
+  ggplot(aes(x=date, y=simulation)) +
+  ggtitle("MC Simulated Covid-19 Cases for California",subtitle ="Figure 4") +
+  geom_bar(stat = 'identity', color="white",  fill="skyblue2", width = 1) +
+  ylab("MC Simulated Case Numbers in CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        plot.title = element_text(size=20,hjust = 0.5),
+        plot.subtitle=element_text(size=15,hjust = 0.5),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1,size = 8),
+        axis.title.y = element_text(size=14))
+```
+```{r,echo = FALSE}
+# combined graph
+plot_df %>%
+  ggplot(aes(x=date, y=value, fill = label)) +
+  geom_bar(stat = 'identity', color="white", width = 1,position="dodge") +
+  ggtitle("Averaged Daily Confirmed Cases v.s. Simulation",subtitle ="Figure 5") +
+  ylab("7-day averaged daily confirmed cases in  CA")+
+  xlab("Date")+ 
+  theme(text = element_text(size = 20),
+        plot.title = element_text(size=18,hjust = 0.5),
+        plot.subtitle=element_text(size=15,hjust = 0.5),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.key.width=unit(1,"cm"),
+        axis.text.y = element_text(angle=90, hjust=1,size = 8),
+        axis.title.y = element_text(size=14))
+```
+
+
+#5. Discussion 
+
+Based on the simulation results and actual covid case comparisons, our simulation is close to the actual Covid-19 confirmed cases. With a more accurate set of infection rates, our model could produce a more accurate simulation/prediction. To properly predict the number of confirmed COVID-19 cases, one must do a fairly accurate prediction of the infection rate. Because we randomly generated the number of people that would get infected using poisson distribution, and based on previous data, it is not necessarily the most accurate in terms of prediction. With more accurate parameters, specifically infection rate and muT, we would be able to eradicate more of the error associated with our model. 
+
+In the future, some more ways that we can apply this simulation model is to continue to use it as a method of predicting covid infections but now comparing different locations to one another. Doing so might help governmental organization and allocation of healthcare resources pertaining to the COVID-19 virus and its impact on our national population. For example, we could potentially use this code to compare the prediction models of an urban versus a more rural population and see how population spread and differences might change the estimated COVID-19 cases in the different states. 
+
+
+#6.Reference:
+
+1. Xie, G. (2020, August 4). A novel Monte Carlo simulation procedure for modelling COVID-19 spread over time. Nature. https://www.nature.com/articles/s41598-020-70091-1#Sec7
+2. Sigman, K. (2010). Inverse Transform Method. Columbia. http://www.columbia.edu/~ks20/4404-Sigman/4404-Notes-ITM.pdf
+3. CSSEGISandData. (2022, June 6).COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv. Github. https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv
+4. CSSEGISandData. (2022, June 6). COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv. Github. https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv
+5. (2022, February 24). What Is Coronavirus? Hopkins Medicine. https://www.hopkinsmedicine.org/health/conditions-and-diseases/coronavirus 
+6. Rizzo, Maria L. (2007, November 15). Statistical Computing with R. Chapman and Hall/CRC
+
+
+
+#7.Appendix
+
+We include the following files in our submission:
+
+1. PSTAT194CS_4PM_Group1_code.Rmd: This file contain detailed codes used to create our project including Covid data cleaning, parameter estimation, model fitting, and graphs. 
+
+2. functions_covid19.R: This files contains functions wrote by Hanmo Li which are used to clean Covid data.
+
+3. time_series_covid19_confirmed_US.csv: This file contain US confirmed Covid cases from JHU CSSE(See Reference#3)
+
+4. time_series_covid19_confirmed_US.csv: This file contain US confirmed Covid death from JHU CSSE(See Reference#4)
+
+5. PSTAT194CS_4PM_Group1_Final_Report.Rmd: This is the Rmd used to create this report
+
+Here is the link to our group's Github: https://github.com/haozezhuucsb/PSTAT194CS_4pmSection_Group1.git
+
+
+
